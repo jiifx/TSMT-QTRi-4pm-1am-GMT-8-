@@ -1,0 +1,1075 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TSMT by Jii - Smart Money Technique Divergence with Correlation Filter
+// Upgraded to Pine Script v6 with improved readability
+
+//@version=6
+indicator(
+     title = "TSMT by Jii (Correlation)", 
+     overlay = true, 
+     max_lines_count = 500, 
+     max_labels_count = 500
+ )
+
+//==============================================================================
+// USER INPUT SETTINGS
+//==============================================================================
+
+// Choose which symbol to compare against (correlated asset)
+correlatedSymbol = input.symbol(
+     defval = "CME_MINI_DL:ES1!", 
+     title = "Correlated Symbol",
+     tooltip = "Symbol to compare for SMT divergences"
+ )
+
+// Toggle visibility of SMT detection levels
+showQuarterSMT = input.bool(
+     defval = true, 
+     title = "Show Quarter SMT",
+     tooltip = "Display SMT divergences between quarters"
+ )
+
+showSubdivisionSMT = input.bool(
+     defval = true, 
+     title = "Show Subdivision SMT",
+     tooltip = "Display SMT divergences within quarter subdivisions"
+ )
+
+// Color scheme for divergences
+bearishSMTColor = input.color(
+     defval = color.rgb(155, 0, 0), 
+     title = 'Bearish SMT Color',
+     tooltip = "Color for bearish divergences"
+ )
+
+bullishSMTColor = input.color(
+     defval = color.rgb(0, 77, 13), 
+     title = 'Bullish SMT Color',
+     tooltip = "Color for bullish divergences"
+ )
+
+// Display options
+showLabels = input.bool(
+     defval = true, 
+     title = "Show Labels",
+     tooltip = "Display correlation values on SMT labels"
+ )
+
+// Correlation filter settings
+correlationThreshold = input.float(
+     defval = 0.8, 
+     title = "Correlation Threshold", 
+     minval = 0.0, 
+     maxval = 1.0, 
+     step = 0.05,
+     tooltip = "Minimum correlation required to show SMT (0-1)"
+ )
+
+correlationPeriod = input.int(
+     defval = 20, 
+     title = "Correlation Period", 
+     minval = 5, 
+     maxval = 100,
+     tooltip = "Lookback period for correlation calculation"
+ )
+
+// Quarter time sessions (New York timezone)
+quarterSession1 = input.session(
+     defval = "0300-0515", 
+     title = "Quarter 1"
+ )
+
+quarterSession2 = input.session(
+     defval = "0515-0730", 
+     title = "Quarter 2"
+ )
+
+quarterSession3 = input.session(
+     defval = "0730-0945", 
+     title = "Quarter 3"
+ )
+
+quarterSession4 = input.session(
+     defval = "0945-1200", 
+     title = "Quarter 4"
+ )
+
+//==============================================================================
+// GLOBAL SETTINGS
+//==============================================================================
+
+TIMEZONE = "America/New_York"
+isIntradayTimeframe = timeframe.isintraday
+
+//==============================================================================
+// FETCH CORRELATED SYMBOL DATA
+//==============================================================================
+
+// Get high and low from correlated symbol
+getCorrelatedHighLow() => 
+    [high, low]
+
+[correlatedHigh, correlatedLow] = request.security(
+     symbol = correlatedSymbol, 
+     timeframe = timeframe.period, 
+     expression = getCorrelatedHighLow()
+ )
+
+//==============================================================================
+// CORRELATION CALCULATION
+//==============================================================================
+
+// Calculate real-time correlation between current symbol and correlated symbol
+correlatedClose = request.security(
+     symbol = correlatedSymbol, 
+     timeframe = timeframe.period, 
+     expression = close
+ )
+
+currentCorrelation = ta.correlation(
+     source1 = close, 
+     source2 = correlatedClose, 
+     length = correlationPeriod
+ )
+
+//==============================================================================
+// SMT DETECTION FUNCTION
+//==============================================================================
+
+// Check for Smart Money Technique divergences between two periods
+// SMT occurs when price and correlated asset move in opposite directions
+// NOTE: This version draws SMT lines only at the end of each period
+checkForSMT(
+     // Previous period data
+     int previousHighBar, float previousHigh, 
+     int previousLowBar, float previousLow,
+     // Current period data
+     int currentHighBar, float currentHigh, 
+     int currentLowBar, float currentLow,
+     // Correlated symbol data
+     float correlatedPreviousHigh, float correlatedPreviousLow,
+     float correlatedCurrentHigh, float correlatedCurrentLow,
+     // Display settings
+     bool isQuarterLevel, string labelText
+ ) =>
+    
+    // Check if correlation is strong enough to show SMT
+    bool correlationIsStrong = math.abs(currentCorrelation) >= correlationThreshold
+    
+    //--------------------------------------------------------------------------
+    // CHECK FOR BULLISH SMT ON HIGHS
+    //--------------------------------------------------------------------------
+    
+    if correlationIsStrong and 
+       not na(previousHigh) and not na(currentHigh) and 
+       not na(previousHighBar) and not na(currentHighBar)
+        
+        // Bullish SMT Scenario 1: Price makes lower high, but correlated makes higher high
+        if currentHigh < previousHigh and correlatedCurrentHigh > correlatedPreviousHigh
+            
+            // Draw divergence line
+            line.new(
+                 x1 = previousHighBar, 
+                 y1 = previousHigh, 
+                 x2 = currentHighBar, 
+                 y2 = currentHigh, 
+                 color = bullishSMTColor, 
+                 width = isQuarterLevel ? 1 : 1, 
+                 style = isQuarterLevel ? line.style_solid : line.style_solid
+             )
+            
+            // Add labels with correlation value
+            if showLabels
+                string displayText = (isQuarterLevel ? labelText + " " : "") + 
+                                   "(ρ=" + str.tostring(math.round(currentCorrelation, 2)) + ")"
+                
+                label.new(
+                     x = previousHighBar, 
+                     y = previousHigh, 
+                     text = displayText, 
+                     color = bullishSMTColor, 
+                     style = label.style_label_down, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+                
+                label.new(
+                     x = currentHighBar, 
+                     y = currentHigh, 
+                     text = displayText, 
+                     color = bullishSMTColor, 
+                     style = label.style_label_down, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+        
+        // Bullish SMT Scenario 2: Price makes higher high, but correlated makes lower high
+        if currentHigh > previousHigh and correlatedCurrentHigh < correlatedPreviousHigh
+            
+            // Draw divergence line
+            line.new(
+                 x1 = previousHighBar, 
+                 y1 = previousHigh, 
+                 x2 = currentHighBar, 
+                 y2 = currentHigh, 
+                 color = bullishSMTColor, 
+                 width = isQuarterLevel ? 1 : 1, 
+                 style = isQuarterLevel ? line.style_solid : line.style_solid
+             )
+            
+            // Add labels with correlation value
+            if showLabels
+                string displayText = (isQuarterLevel ? labelText + " " : "") + 
+                                   "(ρ=" + str.tostring(math.round(currentCorrelation, 2)) + ")"
+                
+                label.new(
+                     x = previousHighBar, 
+                     y = previousHigh, 
+                     text = displayText, 
+                     color = bullishSMTColor, 
+                     style = label.style_label_down, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+                
+                label.new(
+                     x = currentHighBar, 
+                     y = currentHigh, 
+                     text = displayText, 
+                     color = bullishSMTColor, 
+                     style = label.style_label_down, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+    
+    //--------------------------------------------------------------------------
+    // CHECK FOR BEARISH SMT ON LOWS
+    //--------------------------------------------------------------------------
+    
+    if correlationIsStrong and 
+       not na(previousLow) and not na(currentLow) and 
+       not na(previousLowBar) and not na(currentLowBar)
+        
+        // Bearish SMT Scenario 1: Price makes higher low, but correlated makes lower low
+        if currentLow > previousLow and correlatedCurrentLow < correlatedPreviousLow
+            
+            // Draw divergence line
+            line.new(
+                 x1 = previousLowBar, 
+                 y1 = previousLow, 
+                 x2 = currentLowBar, 
+                 y2 = currentLow, 
+                 color = bearishSMTColor, 
+                 width = isQuarterLevel ? 1 : 1, 
+                 style = isQuarterLevel ? line.style_solid : line.style_solid
+             )
+            
+            // Add labels with correlation value
+            if showLabels
+                string displayText = (isQuarterLevel ? labelText + " " : "") + 
+                                   "(ρ=" + str.tostring(math.round(currentCorrelation, 2)) + ")"
+                
+                label.new(
+                     x = previousLowBar, 
+                     y = previousLow, 
+                     text = displayText, 
+                     color = bearishSMTColor, 
+                     style = label.style_label_up, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+                
+                label.new(
+                     x = currentLowBar, 
+                     y = currentLow, 
+                     text = displayText, 
+                     color = bearishSMTColor, 
+                     style = label.style_label_up, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+        
+        // Bearish SMT Scenario 2: Price makes lower low, but correlated makes higher low
+        if currentLow < previousLow and correlatedCurrentLow > correlatedPreviousLow
+            
+            // Draw divergence line
+            line.new(
+                 x1 = previousLowBar, 
+                 y1 = previousLow, 
+                 x2 = currentLowBar, 
+                 y2 = currentLow, 
+                 color = bearishSMTColor, 
+                 width = isQuarterLevel ? 1 : 1, 
+                 style = isQuarterLevel ? line.style_solid : line.style_solid
+             )
+            
+            // Add labels with correlation value
+            if showLabels
+                string displayText = (isQuarterLevel ? labelText + " " : "") + 
+                                   "(ρ=" + str.tostring(math.round(currentCorrelation, 2)) + ")"
+                
+                label.new(
+                     x = previousLowBar, 
+                     y = previousLow, 
+                     text = displayText, 
+                     color = bearishSMTColor, 
+                     style = label.style_label_up, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+                
+                label.new(
+                     x = currentLowBar, 
+                     y = currentLow, 
+                     text = displayText, 
+                     color = bearishSMTColor, 
+                     style = label.style_label_up, 
+                     textcolor = color.white, 
+                     size = size.tiny
+                 )
+
+//==============================================================================
+// QUARTER 1 TRACKING
+//==============================================================================
+
+inQuarter1 = isIntradayTimeframe and not na(time(timeframe.period, quarterSession1, TIMEZONE))
+
+var int quarter1HighBar = na
+var float quarter1High = na
+var int quarter1LowBar = na
+var float quarter1Low = na
+var float correlatedQuarter1High = na
+var float correlatedQuarter1Low = na
+
+// Initialize Quarter 1 values at session start
+if inQuarter1 and not inQuarter1[1]
+    quarter1High := high
+    quarter1Low := low
+    quarter1HighBar := bar_index
+    quarter1LowBar := bar_index
+    correlatedQuarter1High := correlatedHigh
+    correlatedQuarter1Low := correlatedLow
+
+// Update Quarter 1 extremes during session
+if inQuarter1
+    if high >= quarter1High
+        quarter1High := high
+        quarter1HighBar := bar_index
+        correlatedQuarter1High := correlatedHigh
+    
+    if low <= quarter1Low
+        quarter1Low := low
+        quarter1LowBar := bar_index
+        correlatedQuarter1Low := correlatedLow
+
+//==============================================================================
+// QUARTER 2 TRACKING
+//==============================================================================
+
+inQuarter2 = isIntradayTimeframe and not na(time(timeframe.period, quarterSession2, TIMEZONE))
+
+var int quarter2HighBar = na
+var float quarter2High = na
+var int quarter2LowBar = na
+var float quarter2Low = na
+var float correlatedQuarter2High = na
+var float correlatedQuarter2Low = na
+
+// Initialize Quarter 2 values at session start
+if inQuarter2 and not inQuarter2[1]
+    quarter2High := high
+    quarter2Low := low
+    quarter2HighBar := bar_index
+    quarter2LowBar := bar_index
+    correlatedQuarter2High := correlatedHigh
+    correlatedQuarter2Low := correlatedLow
+
+// Update Quarter 2 extremes during session
+if inQuarter2
+    if high >= quarter2High
+        quarter2High := high
+        quarter2HighBar := bar_index
+        correlatedQuarter2High := correlatedHigh
+    
+    if low <= quarter2Low
+        quarter2Low := low
+        quarter2LowBar := bar_index
+        correlatedQuarter2Low := correlatedLow
+
+// Check SMT at end of Quarter 2
+if not inQuarter2 and inQuarter2[1] and showQuarterSMT
+    checkForSMT(
+         quarter1HighBar, quarter1High, quarter1LowBar, quarter1Low,
+         quarter2HighBar, quarter2High, quarter2LowBar, quarter2Low,
+         correlatedQuarter1High, correlatedQuarter1Low,
+         correlatedQuarter2High, correlatedQuarter2Low,
+         true, "SMT"
+     )
+
+//==============================================================================
+// QUARTER 3 TRACKING
+//==============================================================================
+
+inQuarter3 = isIntradayTimeframe and not na(time(timeframe.period, quarterSession3, TIMEZONE))
+
+var int quarter3HighBar = na
+var float quarter3High = na
+var int quarter3LowBar = na
+var float quarter3Low = na
+var float correlatedQuarter3High = na
+var float correlatedQuarter3Low = na
+
+// Initialize Quarter 3 values at session start
+if inQuarter3 and not inQuarter3[1]
+    quarter3High := high
+    quarter3Low := low
+    quarter3HighBar := bar_index
+    quarter3LowBar := bar_index
+    correlatedQuarter3High := correlatedHigh
+    correlatedQuarter3Low := correlatedLow
+
+// Update Quarter 3 extremes during session
+if inQuarter3
+    if high >= quarter3High
+        quarter3High := high
+        quarter3HighBar := bar_index
+        correlatedQuarter3High := correlatedHigh
+    
+    if low <= quarter3Low
+        quarter3Low := low
+        quarter3LowBar := bar_index
+        correlatedQuarter3Low := correlatedLow
+
+// Check SMT at end of Quarter 3
+if not inQuarter3 and inQuarter3[1] and showQuarterSMT
+    checkForSMT(
+         quarter2HighBar, quarter2High, quarter2LowBar, quarter2Low,
+         quarter3HighBar, quarter3High, quarter3LowBar, quarter3Low,
+         correlatedQuarter2High, correlatedQuarter2Low,
+         correlatedQuarter3High, correlatedQuarter3Low,
+         true, "SMT"
+     )
+
+//==============================================================================
+// QUARTER 4 TRACKING
+//==============================================================================
+
+inQuarter4 = isIntradayTimeframe and not na(time(timeframe.period, quarterSession4, TIMEZONE))
+
+var int quarter4HighBar = na
+var float quarter4High = na
+var int quarter4LowBar = na
+var float quarter4Low = na
+var float correlatedQuarter4High = na
+var float correlatedQuarter4Low = na
+
+// Initialize Quarter 4 values at session start
+if inQuarter4 and not inQuarter4[1]
+    quarter4High := high
+    quarter4Low := low
+    quarter4HighBar := bar_index
+    quarter4LowBar := bar_index
+    correlatedQuarter4High := correlatedHigh
+    correlatedQuarter4Low := correlatedLow
+
+// Update Quarter 4 extremes during session
+if inQuarter4
+    if high >= quarter4High
+        quarter4High := high
+        quarter4HighBar := bar_index
+        correlatedQuarter4High := correlatedHigh
+    
+    if low <= quarter4Low
+        quarter4Low := low
+        quarter4LowBar := bar_index
+        correlatedQuarter4Low := correlatedLow
+
+// Check SMT at end of Quarter 4
+if not inQuarter4 and inQuarter4[1] and showQuarterSMT
+    checkForSMT(
+         quarter3HighBar, quarter3High, quarter3LowBar, quarter3Low,
+         quarter4HighBar, quarter4High, quarter4LowBar, quarter4Low,
+         correlatedQuarter3High, correlatedQuarter3Low,
+         correlatedQuarter4High, correlatedQuarter4Low,
+         true, "SMT"
+     )
+
+//==============================================================================
+// QUARTER SUBDIVISIONS TRACKING
+//==============================================================================
+
+if isIntradayTimeframe and showSubdivisionSMT
+    
+    //--------------------------------------------------------------------------
+    // QUARTER 1 SUBDIVISIONS (4 parts)
+    //--------------------------------------------------------------------------
+    
+    inQ1Sub1 = not na(time(timeframe.period, "0300-0334", TIMEZONE))
+    inQ1Sub2 = not na(time(timeframe.period, "0334-0408", TIMEZONE))
+    inQ1Sub3 = not na(time(timeframe.period, "0408-0441", TIMEZONE))
+    inQ1Sub4 = not na(time(timeframe.period, "0441-0515", TIMEZONE))
+    
+    // Subdivision 1.1
+    var int q1Sub1HighBar = na
+    var float q1Sub1High = na
+    var int q1Sub1LowBar = na
+    var float q1Sub1Low = na
+    var float correlatedQ1Sub1High = na
+    var float correlatedQ1Sub1Low = na
+    
+    if inQ1Sub1 and not inQ1Sub1[1]
+        q1Sub1High := high
+        q1Sub1Low := low
+        q1Sub1HighBar := bar_index
+        q1Sub1LowBar := bar_index
+        correlatedQ1Sub1High := correlatedHigh
+        correlatedQ1Sub1Low := correlatedLow
+    
+    if inQ1Sub1
+        if high >= q1Sub1High
+            q1Sub1High := high
+            q1Sub1HighBar := bar_index
+            correlatedQ1Sub1High := correlatedHigh
+        if low <= q1Sub1Low
+            q1Sub1Low := low
+            q1Sub1LowBar := bar_index
+            correlatedQ1Sub1Low := correlatedLow
+    
+    // Subdivision 1.2
+    var int q1Sub2HighBar = na
+    var float q1Sub2High = na
+    var int q1Sub2LowBar = na
+    var float q1Sub2Low = na
+    var float correlatedQ1Sub2High = na
+    var float correlatedQ1Sub2Low = na
+    
+    if inQ1Sub2 and not inQ1Sub2[1]
+        q1Sub2High := high
+        q1Sub2Low := low
+        q1Sub2HighBar := bar_index
+        q1Sub2LowBar := bar_index
+        correlatedQ1Sub2High := correlatedHigh
+        correlatedQ1Sub2Low := correlatedLow
+    
+    if inQ1Sub2
+        if high >= q1Sub2High
+            q1Sub2High := high
+            q1Sub2HighBar := bar_index
+            correlatedQ1Sub2High := correlatedHigh
+        if low <= q1Sub2Low
+            q1Sub2Low := low
+            q1Sub2LowBar := bar_index
+            correlatedQ1Sub2Low := correlatedLow
+    
+    // Check SMT at end of subdivision 1.2
+    if not inQ1Sub2 and inQ1Sub2[1]
+        checkForSMT(
+             q1Sub1HighBar, q1Sub1High, q1Sub1LowBar, q1Sub1Low,
+             q1Sub2HighBar, q1Sub2High, q1Sub2LowBar, q1Sub2Low,
+             correlatedQ1Sub1High, correlatedQ1Sub1Low,
+             correlatedQ1Sub2High, correlatedQ1Sub2Low,
+             false, ""
+         )
+    
+    // Subdivision 1.3
+    var int q1Sub3HighBar = na
+    var float q1Sub3High = na
+    var int q1Sub3LowBar = na
+    var float q1Sub3Low = na
+    var float correlatedQ1Sub3High = na
+    var float correlatedQ1Sub3Low = na
+    
+    if inQ1Sub3 and not inQ1Sub3[1]
+        q1Sub3High := high
+        q1Sub3Low := low
+        q1Sub3HighBar := bar_index
+        q1Sub3LowBar := bar_index
+        correlatedQ1Sub3High := correlatedHigh
+        correlatedQ1Sub3Low := correlatedLow
+    
+    if inQ1Sub3
+        if high >= q1Sub3High
+            q1Sub3High := high
+            q1Sub3HighBar := bar_index
+            correlatedQ1Sub3High := correlatedHigh
+        if low <= q1Sub3Low
+            q1Sub3Low := low
+            q1Sub3LowBar := bar_index
+            correlatedQ1Sub3Low := correlatedLow
+    
+    // Check SMT at end of subdivision 1.3
+    if not inQ1Sub3 and inQ1Sub3[1]
+        checkForSMT(
+             q1Sub2HighBar, q1Sub2High, q1Sub2LowBar, q1Sub2Low,
+             q1Sub3HighBar, q1Sub3High, q1Sub3LowBar, q1Sub3Low,
+             correlatedQ1Sub2High, correlatedQ1Sub2Low,
+             correlatedQ1Sub3High, correlatedQ1Sub3Low,
+             false, ""
+         )
+    
+    // Subdivision 1.4
+    var int q1Sub4HighBar = na
+    var float q1Sub4High = na
+    var int q1Sub4LowBar = na
+    var float q1Sub4Low = na
+    var float correlatedQ1Sub4High = na
+    var float correlatedQ1Sub4Low = na
+    
+    if inQ1Sub4 and not inQ1Sub4[1]
+        q1Sub4High := high
+        q1Sub4Low := low
+        q1Sub4HighBar := bar_index
+        q1Sub4LowBar := bar_index
+        correlatedQ1Sub4High := correlatedHigh
+        correlatedQ1Sub4Low := correlatedLow
+    
+    if inQ1Sub4
+        if high >= q1Sub4High
+            q1Sub4High := high
+            q1Sub4HighBar := bar_index
+            correlatedQ1Sub4High := correlatedHigh
+        if low <= q1Sub4Low
+            q1Sub4Low := low
+            q1Sub4LowBar := bar_index
+            correlatedQ1Sub4Low := correlatedLow
+    
+    // Check SMT at end of subdivision 1.4
+    if not inQ1Sub4 and inQ1Sub4[1]
+        checkForSMT(
+             q1Sub3HighBar, q1Sub3High, q1Sub3LowBar, q1Sub3Low,
+             q1Sub4HighBar, q1Sub4High, q1Sub4LowBar, q1Sub4Low,
+             correlatedQ1Sub3High, correlatedQ1Sub3Low,
+             correlatedQ1Sub4High, correlatedQ1Sub4Low,
+             false, ""
+         )
+    
+    //--------------------------------------------------------------------------
+    // QUARTER 2 SUBDIVISIONS (4 parts)
+    //--------------------------------------------------------------------------
+    
+    inQ2Sub1 = not na(time(timeframe.period, "0515-0549", TIMEZONE))
+    inQ2Sub2 = not na(time(timeframe.period, "0549-0622", TIMEZONE))
+    inQ2Sub3 = not na(time(timeframe.period, "0622-0656", TIMEZONE))
+    inQ2Sub4 = not na(time(timeframe.period, "0656-0730", TIMEZONE))
+    
+    // Subdivision 2.1
+    var int q2Sub1HighBar = na
+    var float q2Sub1High = na
+    var int q2Sub1LowBar = na
+    var float q2Sub1Low = na
+    var float correlatedQ2Sub1High = na
+    var float correlatedQ2Sub1Low = na
+    
+    if inQ2Sub1 and not inQ2Sub1[1]
+        q2Sub1High := high
+        q2Sub1Low := low
+        q2Sub1HighBar := bar_index
+        q2Sub1LowBar := bar_index
+        correlatedQ2Sub1High := correlatedHigh
+        correlatedQ2Sub1Low := correlatedLow
+    
+    if inQ2Sub1
+        if high >= q2Sub1High
+            q2Sub1High := high
+            q2Sub1HighBar := bar_index
+            correlatedQ2Sub1High := correlatedHigh
+        if low <= q2Sub1Low
+            q2Sub1Low := low
+            q2Sub1LowBar := bar_index
+            correlatedQ2Sub1Low := correlatedLow
+    
+    // Subdivision 2.2
+    var int q2Sub2HighBar = na
+    var float q2Sub2High = na
+    var int q2Sub2LowBar = na
+    var float q2Sub2Low = na
+    var float correlatedQ2Sub2High = na
+    var float correlatedQ2Sub2Low = na
+    
+    if inQ2Sub2 and not inQ2Sub2[1]
+        q2Sub2High := high
+        q2Sub2Low := low
+        q2Sub2HighBar := bar_index
+        q2Sub2LowBar := bar_index
+        correlatedQ2Sub2High := correlatedHigh
+        correlatedQ2Sub2Low := correlatedLow
+    
+    if inQ2Sub2
+        if high >= q2Sub2High
+            q2Sub2High := high
+            q2Sub2HighBar := bar_index
+            correlatedQ2Sub2High := correlatedHigh
+        if low <= q2Sub2Low
+            q2Sub2Low := low
+            q2Sub2LowBar := bar_index
+            correlatedQ2Sub2Low := correlatedLow
+    
+    if not inQ2Sub2 and inQ2Sub2[1]
+        checkForSMT(
+             q2Sub1HighBar, q2Sub1High, q2Sub1LowBar, q2Sub1Low,
+             q2Sub2HighBar, q2Sub2High, q2Sub2LowBar, q2Sub2Low,
+             correlatedQ2Sub1High, correlatedQ2Sub1Low,
+             correlatedQ2Sub2High, correlatedQ2Sub2Low,
+             false, ""
+         )
+    
+    // Subdivision 2.3
+    var int q2Sub3HighBar = na
+    var float q2Sub3High = na
+    var int q2Sub3LowBar = na
+    var float q2Sub3Low = na
+    var float correlatedQ2Sub3High = na
+    var float correlatedQ2Sub3Low = na
+    
+    if inQ2Sub3 and not inQ2Sub3[1]
+        q2Sub3High := high
+        q2Sub3Low := low
+        q2Sub3HighBar := bar_index
+        q2Sub3LowBar := bar_index
+        correlatedQ2Sub3High := correlatedHigh
+        correlatedQ2Sub3Low := correlatedLow
+    
+    if inQ2Sub3
+        if high >= q2Sub3High
+            q2Sub3High := high
+            q2Sub3HighBar := bar_index
+            correlatedQ2Sub3High := correlatedHigh
+        if low <= q2Sub3Low
+            q2Sub3Low := low
+            q2Sub3LowBar := bar_index
+            correlatedQ2Sub3Low := correlatedLow
+    
+    if not inQ2Sub3 and inQ2Sub3[1]
+        checkForSMT(
+             q2Sub2HighBar, q2Sub2High, q2Sub2LowBar, q2Sub2Low,
+             q2Sub3HighBar, q2Sub3High, q2Sub3LowBar, q2Sub3Low,
+             correlatedQ2Sub2High, correlatedQ2Sub2Low,
+             correlatedQ2Sub3High, correlatedQ2Sub3Low,
+             false, ""
+         )
+    
+    // Subdivision 2.4
+    var int q2Sub4HighBar = na
+    var float q2Sub4High = na
+    var int q2Sub4LowBar = na
+    var float q2Sub4Low = na
+    var float correlatedQ2Sub4High = na
+    var float correlatedQ2Sub4Low = na
+    
+    if inQ2Sub4 and not inQ2Sub4[1]
+        q2Sub4High := high
+        q2Sub4Low := low
+        q2Sub4HighBar := bar_index
+        q2Sub4LowBar := bar_index
+        correlatedQ2Sub4High := correlatedHigh
+        correlatedQ2Sub4Low := correlatedLow
+    
+    if inQ2Sub4
+        if high >= q2Sub4High
+            q2Sub4High := high
+            q2Sub4HighBar := bar_index
+            correlatedQ2Sub4High := correlatedHigh
+        if low <= q2Sub4Low
+            q2Sub4Low := low
+            q2Sub4LowBar := bar_index
+            correlatedQ2Sub4Low := correlatedLow
+    
+    if not inQ2Sub4 and inQ2Sub4[1]
+        checkForSMT(
+             q2Sub3HighBar, q2Sub3High, q2Sub3LowBar, q2Sub3Low,
+             q2Sub4HighBar, q2Sub4High, q2Sub4LowBar, q2Sub4Low,
+             correlatedQ2Sub3High, correlatedQ2Sub3Low,
+             correlatedQ2Sub4High, correlatedQ2Sub4Low,
+             false, ""
+         )
+    
+    //--------------------------------------------------------------------------
+    // QUARTER 3 SUBDIVISIONS (4 parts)
+    //--------------------------------------------------------------------------
+    
+    inQ3Sub1 = not na(time(timeframe.period, "0730-0804", TIMEZONE))
+    inQ3Sub2 = not na(time(timeframe.period, "0804-0837", TIMEZONE))
+    inQ3Sub3 = not na(time(timeframe.period, "0837-0911", TIMEZONE))
+    inQ3Sub4 = not na(time(timeframe.period, "0911-0945", TIMEZONE))
+    
+    // Subdivision 3.1
+    var int q3Sub1HighBar = na
+    var float q3Sub1High = na
+    var int q3Sub1LowBar = na
+    var float q3Sub1Low = na
+    var float correlatedQ3Sub1High = na
+    var float correlatedQ3Sub1Low = na
+    
+    if inQ3Sub1 and not inQ3Sub1[1]
+        q3Sub1High := high
+        q3Sub1Low := low
+        q3Sub1HighBar := bar_index
+        q3Sub1LowBar := bar_index
+        correlatedQ3Sub1High := correlatedHigh
+        correlatedQ3Sub1Low := correlatedLow
+    
+    if inQ3Sub1
+        if high >= q3Sub1High
+            q3Sub1High := high
+            q3Sub1HighBar := bar_index
+            correlatedQ3Sub1High := correlatedHigh
+        if low <= q3Sub1Low
+            q3Sub1Low := low
+            q3Sub1LowBar := bar_index
+            correlatedQ3Sub1Low := correlatedLow
+    
+    // Subdivision 3.2
+    var int q3Sub2HighBar = na
+    var float q3Sub2High = na
+    var int q3Sub2LowBar = na
+    var float q3Sub2Low = na
+    var float correlatedQ3Sub2High = na
+    var float correlatedQ3Sub2Low = na
+    
+    if inQ3Sub2 and not inQ3Sub2[1]
+        q3Sub2High := high
+        q3Sub2Low := low
+        q3Sub2HighBar := bar_index
+        q3Sub2LowBar := bar_index
+        correlatedQ3Sub2High := correlatedHigh
+        correlatedQ3Sub2Low := correlatedLow
+    
+    if inQ3Sub2
+        if high >= q3Sub2High
+            q3Sub2High := high
+            q3Sub2HighBar := bar_index
+            correlatedQ3Sub2High := correlatedHigh
+        if low <= q3Sub2Low
+            q3Sub2Low := low
+            q3Sub2LowBar := bar_index
+            correlatedQ3Sub2Low := correlatedLow
+    
+    if not inQ3Sub2 and inQ3Sub2[1]
+        checkForSMT(
+             q3Sub1HighBar, q3Sub1High, q3Sub1LowBar, q3Sub1Low,
+             q3Sub2HighBar, q3Sub2High, q3Sub2LowBar, q3Sub2Low,
+             correlatedQ3Sub1High, correlatedQ3Sub1Low,
+             correlatedQ3Sub2High, correlatedQ3Sub2Low,
+             false, ""
+         )
+    
+    // Subdivision 3.3
+    var int q3Sub3HighBar = na
+    var float q3Sub3High = na
+    var int q3Sub3LowBar = na
+    var float q3Sub3Low = na
+    var float correlatedQ3Sub3High = na
+    var float correlatedQ3Sub3Low = na
+    
+    if inQ3Sub3 and not inQ3Sub3[1]
+        q3Sub3High := high
+        q3Sub3Low := low
+        q3Sub3HighBar := bar_index
+        q3Sub3LowBar := bar_index
+        correlatedQ3Sub3High := correlatedHigh
+        correlatedQ3Sub3Low := correlatedLow
+    
+    if inQ3Sub3
+        if high >= q3Sub3High
+            q3Sub3High := high
+            q3Sub3HighBar := bar_index
+            correlatedQ3Sub3High := correlatedHigh
+        if low <= q3Sub3Low
+            q3Sub3Low := low
+            q3Sub3LowBar := bar_index
+            correlatedQ3Sub3Low := correlatedLow
+    
+    if not inQ3Sub3 and inQ3Sub3[1]
+        checkForSMT(
+             q3Sub2HighBar, q3Sub2High, q3Sub2LowBar, q3Sub2Low,
+             q3Sub3HighBar, q3Sub3High, q3Sub3LowBar, q3Sub3Low,
+             correlatedQ3Sub2High, correlatedQ3Sub2Low,
+             correlatedQ3Sub3High, correlatedQ3Sub3Low,
+             false, ""
+         )
+    
+    // Subdivision 3.4
+    var int q3Sub4HighBar = na
+    var float q3Sub4High = na
+    var int q3Sub4LowBar = na
+    var float q3Sub4Low = na
+    var float correlatedQ3Sub4High = na
+    var float correlatedQ3Sub4Low = na
+    
+    if inQ3Sub4 and not inQ3Sub4[1]
+        q3Sub4High := high
+        q3Sub4Low := low
+        q3Sub4HighBar := bar_index
+        q3Sub4LowBar := bar_index
+        correlatedQ3Sub4High := correlatedHigh
+        correlatedQ3Sub4Low := correlatedLow
+    
+    if inQ3Sub4
+        if high >= q3Sub4High
+            q3Sub4High := high
+            q3Sub4HighBar := bar_index
+            correlatedQ3Sub4High := correlatedHigh
+        if low <= q3Sub4Low
+            q3Sub4Low := low
+            q3Sub4LowBar := bar_index
+            correlatedQ3Sub4Low := correlatedLow
+    
+    if not inQ3Sub4 and inQ3Sub4[1]
+        checkForSMT(
+             q3Sub3HighBar, q3Sub3High, q3Sub3LowBar, q3Sub3Low,
+             q3Sub4HighBar, q3Sub4High, q3Sub4LowBar, q3Sub4Low,
+             correlatedQ3Sub3High, correlatedQ3Sub3Low,
+             correlatedQ3Sub4High, correlatedQ3Sub4Low,
+             false, ""
+         )
+    
+    //--------------------------------------------------------------------------
+    // QUARTER 4 SUBDIVISIONS (4 parts)
+    //--------------------------------------------------------------------------
+    
+    inQ4Sub1 = not na(time(timeframe.period, "0945-1019", TIMEZONE))
+    inQ4Sub2 = not na(time(timeframe.period, "1019-1052", TIMEZONE))
+    inQ4Sub3 = not na(time(timeframe.period, "1052-1126", TIMEZONE))
+    inQ4Sub4 = not na(time(timeframe.period, "1126-1200", TIMEZONE))
+    
+    // Subdivision 4.1
+    var int q4Sub1HighBar = na
+    var float q4Sub1High = na
+    var int q4Sub1LowBar = na
+    var float q4Sub1Low = na
+    var float correlatedQ4Sub1High = na
+    var float correlatedQ4Sub1Low = na
+    
+    if inQ4Sub1 and not inQ4Sub1[1]
+        q4Sub1High := high
+        q4Sub1Low := low
+        q4Sub1HighBar := bar_index
+        q4Sub1LowBar := bar_index
+        correlatedQ4Sub1High := correlatedHigh
+        correlatedQ4Sub1Low := correlatedLow
+    
+    if inQ4Sub1
+        if high >= q4Sub1High
+            q4Sub1High := high
+            q4Sub1HighBar := bar_index
+            correlatedQ4Sub1High := correlatedHigh
+        if low <= q4Sub1Low
+            q4Sub1Low := low
+            q4Sub1LowBar := bar_index
+            correlatedQ4Sub1Low := correlatedLow
+    
+    // Subdivision 4.2
+    var int q4Sub2HighBar = na
+    var float q4Sub2High = na
+    var int q4Sub2LowBar = na
+    var float q4Sub2Low = na
+    var float correlatedQ4Sub2High = na
+    var float correlatedQ4Sub2Low = na
+    
+    if inQ4Sub2 and not inQ4Sub2[1]
+        q4Sub2High := high
+        q4Sub2Low := low
+        q4Sub2HighBar := bar_index
+        q4Sub2LowBar := bar_index
+        correlatedQ4Sub2High := correlatedHigh
+        correlatedQ4Sub2Low := correlatedLow
+    
+    if inQ4Sub2
+        if high >= q4Sub2High
+            q4Sub2High := high
+            q4Sub2HighBar := bar_index
+            correlatedQ4Sub2High := correlatedHigh
+        if low <= q4Sub2Low
+            q4Sub2Low := low
+            q4Sub2LowBar := bar_index
+            correlatedQ4Sub2Low := correlatedLow
+    
+    if not inQ4Sub2 and inQ4Sub2[1]
+        checkForSMT(
+             q4Sub1HighBar, q4Sub1High, q4Sub1LowBar, q4Sub1Low,
+             q4Sub2HighBar, q4Sub2High, q4Sub2LowBar, q4Sub2Low,
+             correlatedQ4Sub1High, correlatedQ4Sub1Low,
+             correlatedQ4Sub2High, correlatedQ4Sub2Low,
+             false, ""
+         )
+    
+    // Subdivision 4.3
+    var int q4Sub3HighBar = na
+    var float q4Sub3High = na
+    var int q4Sub3LowBar = na
+    var float q4Sub3Low = na
+    var float correlatedQ4Sub3High = na
+    var float correlatedQ4Sub3Low = na
+    
+    if inQ4Sub3 and not inQ4Sub3[1]
+        q4Sub3High := high
+        q4Sub3Low := low
+        q4Sub3HighBar := bar_index
+        q4Sub3LowBar := bar_index
+        correlatedQ4Sub3High := correlatedHigh
+        correlatedQ4Sub3Low := correlatedLow
+    
+    if inQ4Sub3
+        if high >= q4Sub3High
+            q4Sub3High := high
+            q4Sub3HighBar := bar_index
+            correlatedQ4Sub3High := correlatedHigh
+        if low <= q4Sub3Low
+            q4Sub3Low := low
+            q4Sub3LowBar := bar_index
+            correlatedQ4Sub3Low := correlatedLow
+    
+    if not inQ4Sub3 and inQ4Sub3[1]
+        checkForSMT(
+             q4Sub2HighBar, q4Sub2High, q4Sub2LowBar, q4Sub2Low,
+             q4Sub3HighBar, q4Sub3High, q4Sub3LowBar, q4Sub3Low,
+             correlatedQ4Sub2High, correlatedQ4Sub2Low,
+             correlatedQ4Sub3High, correlatedQ4Sub3Low,
+             false, ""
+         )
+    
+    // Subdivision 4.4
+    var int q4Sub4HighBar = na
+    var float q4Sub4High = na
+    var int q4Sub4LowBar = na
+    var float q4Sub4Low = na
+    var float correlatedQ4Sub4High = na
+    var float correlatedQ4Sub4Low = na
+    
+    if inQ4Sub4 and not inQ4Sub4[1]
+        q4Sub4High := high
+        q4Sub4Low := low
+        q4Sub4HighBar := bar_index
+        q4Sub4LowBar := bar_index
+        correlatedQ4Sub4High := correlatedHigh
+        correlatedQ4Sub4Low := correlatedLow
+    
+    if inQ4Sub4
+        if high >= q4Sub4High
+            q4Sub4High := high
+            q4Sub4HighBar := bar_index
+            correlatedQ4Sub4High := correlatedHigh
+        if low <= q4Sub4Low
+            q4Sub4Low := low
+            q4Sub4LowBar := bar_index
+            correlatedQ4Sub4Low := correlatedLow
+    
+    if not inQ4Sub4 and inQ4Sub4[1]
+        checkForSMT(
+             q4Sub3HighBar, q4Sub3High, q4Sub3LowBar, q4Sub3Low,
+             q4Sub4HighBar, q4Sub4High, q4Sub4LowBar, q4Sub4Low,
+             correlatedQ4Sub3High, correlatedQ4Sub3Low,
+             correlatedQ4Sub4High, correlatedQ4Sub4Low,
+             false, ""
+         )
+
+//==============================================================================
+// CORRELATION VISUALIZATION
+//==============================================================================
+
+// Plot correlation coefficient for visual reference
+plot(
+     series = currentCorrelation, 
+     title = "Correlation Coefficient", 
+     color = color.blue, 
+     linewidth = 2
+ )
